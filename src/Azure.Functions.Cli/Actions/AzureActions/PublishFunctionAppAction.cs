@@ -126,7 +126,7 @@ namespace Azure.Functions.Cli.Actions.AzureActions
             // The value of 'dotnet-cli-params' option should either use a leading space character or escape the double quotes explicitly.
             // Ex 1: --dotnet-cli-params " --configuration debug"
             // Ex 2: --dotnet-cli-params "\"--configuration debug"\"
-            // If you don't do this, the value with leading - or -- will be read as a key (rather than the value of 'dotnet-cli-params'). 
+            // If you don't do this, the value with leading - or -- will be read as a key (rather than the value of 'dotnet-cli-params').
             // See https://github.com/fclp/fluent-command-line-parser/issues/99 for reference.
             Parser
                 .Setup<string>("dotnet-cli-params")
@@ -1022,6 +1022,7 @@ namespace Azure.Functions.Cli.Actions.AzureActions
                 var packageMD5 = SecurityHelpers.CalculateMd5(package);
 
                 const string containerName = "function-releases";
+                bool useSas = true;
 
                 BlobContainerClient blobContainerClient = null;
                 try
@@ -1029,8 +1030,8 @@ namespace Azure.Functions.Cli.Actions.AzureActions
                     if (appSettings.TryGetValue(Constants.AzureWebJobsStorageAccountName, out var accountName))
                     {
                         var storageAccount = await ArmClient.FindStorageAccount(accountName);
-                        blobContainerClient = new BlobContainerClient(new UriBuilder(storageAccount.Properties.PrimaryEndpoints.Blob) { Path = containerName }.Uri,
-                            new Storage.StorageSharedKeyCredential(accountName, storageAccount.Key.Value));
+                        useSas = false;
+                        blobContainerClient = new BlobContainerClient(new UriBuilder(storageAccount.Properties.PrimaryEndpoints.Blob) { Path = containerName }.Uri, this.Credential);
                     }
                     else if (appSettings.TryGetValue(Constants.AzureWebJobsStorage, out var connectionString))
                     {
@@ -1064,14 +1065,19 @@ namespace Azure.Functions.Cli.Actions.AzureActions
                     throw new CliException("Upload failed: Integrity error: MD5 hash mismatch between the local copy and the uploaded copy.");
                 }
 
-                var sasConstraints = new BlobSasBuilder
+                if (useSas)
                 {
-                    StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5),
-                    ExpiresOn = DateTimeOffset.UtcNow.AddYears(10),
-                };
-                sasConstraints.SetPermissions(BlobAccountSasPermissions.Read);
+                    var sasConstraints = new BlobSasBuilder
+                    {
+                        StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5),
+                        ExpiresOn = DateTimeOffset.UtcNow.AddYears(10),
+                    };
+                    sasConstraints.SetPermissions(BlobAccountSasPermissions.Read);
 
-                return blob.GenerateSasUri(sasConstraints).ToString();
+                    return blob.GenerateSasUri(sasConstraints).ToString();
+                }
+
+                return blob.Uri.ToString();
             }, 3, TimeSpan.FromSeconds(1), displayError: true);
         }
 
